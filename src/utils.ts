@@ -317,7 +317,12 @@ export function flattenChain(
 								} else (result as any)[key] = v.slice()
 							} else if (existing) (existing as any[]).push(v)
 							else (result as any)[key] = [v]
-						} else (result as any)[key] = v
+						} else if (key === 'detail')
+							(result as any).detail = mergeDetail(
+								(result as any).detail,
+								v
+							)
+						else (result as any)[key] = v
 					}
 			}
 
@@ -877,6 +882,31 @@ export function coalesceSchemas(existing: any[], incoming: any[]) {
 	}
 }
 
+/**
+ * Merge two `detail` (OpenAPI operation) objects into a new one
+ *
+ * The more specific side wins a key both declare, and arrays replace
+ * rather than concatenate: `security`, `parameters` and `servers`
+ * override in OpenAPI, and `security: []` must be able to opt out
+ *
+ * Neither input is written to, both may be shared between routes
+ */
+export function mergeDetail<T extends Record<string, any>>(
+	base: T | undefined,
+	specific: T | undefined
+): T | undefined {
+	if (!base) return specific
+	if (!specific) return base
+
+	const detail = clonePlainDeep(base)
+
+	// `clonePlainDeep` returns non-plain leaf (eg. TypeBox schema) by
+	// reference, guard it so `mergeDeep` doesn't write into a shared object
+	guardNonPlainLeaves(detail, specific)
+
+	return mergeDeep(detail, specific)
+}
+
 export function mergeHook(
 	a: Partial<AppHook>,
 	b: Partial<AppHook> | undefined,
@@ -897,6 +927,12 @@ export function mergeHook(
 	for (const key of hookEventKeys)
 		if ((a as any)[key] || (b as any)[key])
 			(a as any)[key] = merge((a as any)[key], (b as any)[key], reverse)
+
+	// `tags` is shorthand for `detail.tags`
+	if (!(a as any).tags && (b as any).tags) (a as any).tags = (b as any).tags
+
+	if ((b as any).detail)
+		(a as any).detail = mergeDetail((b as any).detail, (a as any).detail)
 
 	if (a.schemas || b.schemas)
 		a.schemas = mergeArray(a.schemas, b.schemas, reverse) as any
